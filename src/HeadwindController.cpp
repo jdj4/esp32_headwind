@@ -1,6 +1,6 @@
 #include "HeadwindController.h"
 
-/*
+/**
  * Sets the power (fan speed) of the headwind device. The variable `power` can only be
  * between 0 and 100 inclusive. Setting power to 0 will turn the fan off, and setting
  * to a higher value will turn the fan on again.
@@ -17,7 +17,7 @@ bool HeadwindController::setPower(int power) {
     return false;
 }
 
-/*
+/**
  * Connects to the headwind device using the MAC Address defined in `HeadwindController.h`.
  * Connets to the device without scanning for bluetooth devices using the address. Returns
  * a boolean based on whether the device connects.
@@ -94,7 +94,7 @@ bool HeadwindController::connectToHeadwind() {
     }
 };
 
-/*
+/**
  * Attempts to reconnect to the headwind device in the case of a failed connection.
 */
 bool HeadwindController::reconnect() {

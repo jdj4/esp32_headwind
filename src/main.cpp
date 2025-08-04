@@ -8,10 +8,11 @@
 
 #include "HeadwindController.h"
 
-#define LED_PIN 8
 #define DEVICE_NAME "Headwind_1"
-#define CONFIG_FILENAME "/wifi_cred.dat"
 #define HTTP_PORT 80
+
+// Conditional compilation flag, set to `true` to erase the contents of the ESP filesystem
+#define FORMAT_FS false
 
 //const String ssid = "js25";
 //const String password  = "xhj6yyhn3q3vp8u";
@@ -24,11 +25,15 @@ const int pluginPort = 31322;
 // WiFi Manager Setup
 AsyncWebServer server(HTTP_PORT);
 
+String deviceName = "Headwind";
+
+const char* NAME_PARAM = "device_name";
 const char* SSID_PARAM = "ssid";
 const char* PASS_PARAM = "pass";
 const char* IP_PARAM = "ip";
 const char* GATEWAY_PARAM = "gateway";
 
+const char* deviceNamePath = "/device_name.txt";
 const char* ssidPath = "/ssid.txt";
 const char* passPath = "/pass.txt";
 const char* ipPath = "/ip.txt";
@@ -46,17 +51,8 @@ IPAddress subnet(255, 255, 0, 0);
 unsigned long prevMillis = 0;
 const long interval = 10000; // Interval to wait for wifi connection (millis)
 
-bool initialConnection;
-
 HeadwindController* headwind;
-//AsyncWebServer server(HTTP_PORT);
-
-//IPAddress localIP = IPAddress(10, 192, 98, 175);
-//IPAddress localIP = IPAddress(0, 0, 0, 0);
-//IPAddress gateway = IPAddress(192, 168, 2, 1);
-//IPAddress subnet = IPAddress(255, 255, 255, 0);
-
-String ledState;
+bool initialConnection;
 int speed;
 
 void initLittleFS() {
@@ -67,8 +63,7 @@ void initLittleFS() {
     }
 }
 
-// TODO: Rename to readWiFiConfig
-String readFile(fs::FS &fs, const char* path) {
+String readWiFiConfig(fs::FS &fs, const char* path) {
     Serial.printf("Reading file: %s\r\n", path);
 
     File file = fs.open(path);
@@ -94,118 +89,52 @@ void writeWiFiConfig(fs::FS &fs, const char* path, const char* message) {
         return;
     }
 
-    if (file.print(message)) {
+    if (file.print(message))
         Serial.println("File written");
-    } else {
+    else
         Serial.println("Write failed");
-    }
 }
 
-// TODO: Rename to connectToWiFi
-bool initWiFi() {
+bool connectToWiFi() {
     if (ssid == "" || ip == "") {
         Serial.println("Undefined ssid or IP address");
         return false;
     }
-    Serial.printf("ssid: %s\n", ssid);
-    Serial.printf("password: %s\n", password);
-    Serial.printf("ip: %s\n", ip);
-    Serial.printf("gateway: %s\n", gateway);
+    const char* ssid_c = ssid.c_str();
+    const char* pass_c = password.c_str();
+    const char* ip_c = ip.c_str();
+    const char* gateway_c = gateway.c_str();
 
     WiFi.mode(WIFI_STA);
-    localIP.fromString(ip.c_str());
-    localGateway.fromString(gateway.c_str());
+    localIP.fromString(ip_c);
+    localGateway.fromString(gateway_c);
 
-    if (!WiFi.config(localIP, localGateway, subnet)) {
-        Serial.println("STA failed to configure");
-        return false;
-    }
-    WiFi.begin(ssid.c_str(), password.c_str());
+    WiFi.begin(ssid_c, pass_c);
 
     unsigned long currentMillis = millis();
     prevMillis = currentMillis;
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
 
-        /*if (initialConnection)
+        if (initialConnection)
             Serial.println("Connecting to WiFi...");
         else
-            Serial.println("Reconnecting to WiFi...");*/
+            Serial.println("Reconnecting to WiFi...");
 
         currentMillis = millis();
-        if (currentMillis - prevMillis <= interval) {
+        if (currentMillis - prevMillis >= interval) {
             Serial.println("Failed to connect to WiFi");
             return false;
         }
     }
     Serial.println("Connected to WiFi");
-    Serial.printf("IP Address: %s\n", WiFi.localIP());
+    Serial.print("IP Address: "); 
+    Serial.println(WiFi.localIP());
     return true;
 }
 
-/*String processor(const String& var) {
-    if (var == "STATE") {
-        if (digitalRead(LED_PIN)) {
-            ledState = "ON";
-        } else {
-            ledState = "OFF";
-        }
-        return ledState;
-    }
-    return String();
-}
-
-void sendDeviceInfo(IPAddress destinationAddress) {
-    char buffer[100];
-    connection.beginPacket(destinationAddress, connectionPort);
-    strcpy(buffer, "devInfo " DEVICE_NAME);
-    Serial.println(buffer);
-    connection.write((const uint8_t *)&buffer, strlen(buffer) + 1);
-    connection.endPacket();
-}
-
-typedef struct {
-    String ssid;
-    String password;
-} WiFi_Config;
-
-WiFi_Config loadConfigData() {
-    WiFi_Config config;
-
-    File file = SPIFFS.open(CONFIG_FILENAME, "r");
-    if (!file) {
-        Serial.println("Failed to open config file");
-        return config;
-    }
-    config.ssid = file.readStringUntil('\n');
-    config.password = file.readStringUntil('\n');
-
-    config.ssid.trim();
-    config.password.trim();
-
-    file.close();
-    return config;
-}
-
-void connectToWiFi(String ssid, String password, bool initialConnection) {
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        if (initialConnection)
-            Serial.println("Connecting to WiFi...");
-        else
-            Serial.println("Reconnecting to WiFi...");
-    }
-    Serial.println("Connected to WiFi");
-    Serial.print("IP Address: ");
-    Serial.println(WiFi.localIP());
-}*/
-
 void setup() {
     Serial.begin(115200);
-
-    pinMode(LED_PIN, OUTPUT);
-    digitalWrite(LED_PIN, LOW);
 
     // Connect to bluetooth and wifi
     BLEDevice::init("ESP32-BLE-CLIENT");
@@ -231,96 +160,20 @@ void setup() {
     }*/
 
     initLittleFS();
-    //LittleFS.format(); // Needed for testing
+#if (FORMAT_FS)
+    LittleFS.format(); // Formats the filesystem for testing purposes
+#endif
+    ssid = readWiFiConfig(LittleFS, ssidPath);
+    password = readWiFiConfig(LittleFS, passPath);
+    ip = readWiFiConfig(LittleFS, ipPath);
+    gateway = readWiFiConfig(LittleFS, gatewayPath);
 
-    ssid = readFile(LittleFS, ssidPath);
-    password = readFile(LittleFS, passPath);
-    ip = readFile(LittleFS, ipPath);
-    gateway = readFile(LittleFS, gatewayPath);
-    /*Serial.printf("ssid: %s\n", ssid); // TODO: Remove these
-    Serial.printf("password: %s\n", password);
-    Serial.printf("ip: %s\n", ip);
-    Serial.printf("gateway: %s\n", gateway);*/
-
-    // Connect to WiFi using WiFi credentials
     initialConnection = true;
-    //connectToWiFi(config.ssid, config.password, initialConnection);
-
-    if (initWiFi()) {
-        String index = R"rawliteral(
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>ESP WEB SERVER</title>
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <link rel="stylesheet" type="text/css" href="style.css">
-            <link rel="icon" type="image/png" href="favicon.png">
-            <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
-        </head>
-        <body>
-            <div class="topnav">
-            <h1>ESP WEB SERVER</h1>
-            </div>
-            <div class="content">
-            <div class="card-grid">
-                <div class="card">
-                <p class="card-title"><i class="fas fa-lightbulb"></i> GPIO 2</p>
-                <p>
-                    <a href="on"><button class="button-on">ON</button></a>
-                    <a href="off"><button class="button-off">OFF</button></a>
-                </p>
-                <p class="state">State: %STATE%</p>
-                </div>
-            </div>
-            </div>
-        </body>
-        </html>
-        )rawliteral";
-
-        // Route for root / web page
-        /*server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-            request->send(LittleFS, "/index.html", "text/html", false, processor);
-        });
-        server.serveStatic("/", LittleFS, "/");
-        
-        // Route to set GPIO state to HIGH
-        server.on("/on", HTTP_GET, [](AsyncWebServerRequest *request) {
-            digitalWrite(LED_PIN, HIGH);
-            request->send(LittleFS, "/index.html", "text/html", false, processor);
-        });
-
-        // Route to set GPIO state to LOW
-        server.on("/off", HTTP_GET, [](AsyncWebServerRequest *request) {
-            digitalWrite(LED_PIN, LOW);
-            request->send(LittleFS, "/index.html", "text/html", false, processor);
-        });*/
-
-        server.on("/", HTTP_GET, [index](AsyncWebServerRequest *request) {
-            request->send(200, "text/html", index);
-        });
-        server.serveStatic("/", LittleFS, "/");
-        
-        // Route to set GPIO state to HIGH
-        server.on("/on", HTTP_GET, [index](AsyncWebServerRequest *request) {
-            digitalWrite(LED_PIN, HIGH);
-            request->send(200, "text/html", index);
-        });
-
-        // Route to set GPIO state to LOW
-        server.on("/off", HTTP_GET, [index](AsyncWebServerRequest *request) {
-            digitalWrite(LED_PIN, LOW);
-            request->send(200, "text/html", index);
-        });
-
-        server.begin();
-    } else {
-        // Connect to Wi-Fi network with SSID and password
-        Serial.println("Setting AP (Access Point)");
-        // NULL sets an open Access Point
+    if (!connectToWiFi()) {
         WiFi.softAP("ESP-WIFI-MANAGER", NULL);
 
         IPAddress IP = WiFi.softAPIP();
-        Serial.print("AP IP address: ");
+        Serial.print("Access Point IP address, set ssid and password of your network here: ");
         Serial.println(IP); 
         
         /*if (LittleFS.exists("/wifimanager.html"))
@@ -333,7 +186,6 @@ void setup() {
             request->send(LittleFS, "/wifimanager.html", "text/html");
         });*/
 
-        // Web Server Root URL
         server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
             request->send(200, "text/html", R"rawliteral(
                 <!DOCTYPE html>
@@ -341,8 +193,6 @@ void setup() {
                 <head>
                 <title>ESP Wi-Fi Manager</title>
                 <meta name="viewport" content="width=device-width, initial-scale=1">
-                <link rel="icon" href="data:,">
-                <link rel="stylesheet" type="text/css" href="style.css">
                 </head>
                 <body>
                 <div class="topnav">
@@ -353,6 +203,8 @@ void setup() {
                     <div class="card">
                         <form action="/" method="POST">
                         <p>
+                            <label for="device_name">Device Name</label>
+                            <input type="text" id="device_name" name="device_name" value="Headwind"><br>
                             <label for="ssid">SSID</label>
                             <input type="text" id="ssid" name="ssid"><br>
                             <label for="pass">Password</label>
@@ -378,45 +230,51 @@ void setup() {
             int params = request->params();
             for(int i=0;i<params;i++){
                 const AsyncWebParameter* p = request->getParam(i);
-                if(p->isPost()){
-                // HTTP POST ssid value
-                if (p->name() == SSID_PARAM) {
-                    ssid = p->value().c_str();
-                    Serial.print("SSID set to: ");
-                    Serial.println(ssid);
-                    // Write file to save value
-                    writeWiFiConfig(LittleFS, ssidPath, ssid.c_str());
-                }
-                // HTTP POST pass value
-                if (p->name() == PASS_PARAM) {
-                    password = p->value().c_str();
-                    Serial.print("Password set to: ");
-                    Serial.println(password);
-                    // Write file to save value
-                    writeWiFiConfig(LittleFS, passPath, password.c_str());
-                }
-                // HTTP POST ip value
-                if (p->name() == IP_PARAM) {
-                    ip = p->value().c_str();
-                    Serial.print("IP Address set to: ");
-                    Serial.println(ip);
-                    // Write file to save value
-                    writeWiFiConfig(LittleFS, ipPath, ip.c_str());
-                }
-                // HTTP POST gateway value
-                if (p->name() == GATEWAY_PARAM) {
-                    gateway = p->value().c_str();
-                    Serial.print("Gateway set to: ");
-                    Serial.println(gateway);
-                    // Write file to save value
-                    writeWiFiConfig(LittleFS, gatewayPath, gateway.c_str());
-                }
-                //Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
+                if(p->isPost()) {
+                    if (p->name() == NAME_PARAM) {
+                        deviceName = p->value();
+                        Serial.print("Device name set to: ");
+                        Serial.println(deviceName);
+                        writeWiFiConfig(LittleFS, deviceNamePath, deviceName.c_str());
+                    }
+                    // HTTP POST ssid value
+                    if (p->name() == SSID_PARAM) {
+                        ssid = p->value();
+                        Serial.print("SSID set to: ");
+                        Serial.println(ssid);
+                        writeWiFiConfig(LittleFS, ssidPath, ssid.c_str());
+                    }
+                    // HTTP POST pass value
+                    if (p->name() == PASS_PARAM) {
+                        password = p->value();
+                        Serial.print("Password set to: ");
+                        Serial.println(password);
+                        writeWiFiConfig(LittleFS, passPath, password.c_str());
+                    }
+                    // HTTP POST ip value
+                    if (p->name() == IP_PARAM) {
+                        ip = p->value();
+                        Serial.print("IP Address set to: ");
+                        Serial.println(ip);
+                        writeWiFiConfig(LittleFS, ipPath, ip.c_str());
+                    }
+                    // HTTP POST gateway value
+                    if (p->name() == GATEWAY_PARAM) {
+                        gateway = p->value();
+                        Serial.print("Gateway set to: ");
+                        Serial.println(gateway);
+                        writeWiFiConfig(LittleFS, gatewayPath, gateway.c_str());
+                    }
+                    //Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
                 }
             }
-            request->send(200, "text/plain", "Done. ESP will restart, connect to your router and go to IP address: " + ip);
+#if (FORMAT_FS)
+            request->send(200, "text/plain", "WiFi config written.");
+#else
+            request->send(200, "text/plain", "WiFi config written. ESP will restart, connect to your router and go to IP address: " + ip);
             delay(3000);
             ESP.restart();
+#endif
         });
         server.begin();
     }
@@ -511,12 +369,12 @@ void loop() {
         headwind->reconnect();
         delay(1000);
     }
-
-    /*if (WiFi.status() != WL_CONNECTED) {
+#if (!FORMAT_FS)
+    if (WiFi.status() != WL_CONNECTED) {
         Serial.println("Reconnecting to WiFi...");
-        WiFi_Config config = loadConfigData();
         initialConnection = false;
-        connectToWiFi(config.ssid, config.password, initialConnection);
+        connectToWiFi();
         delay(1000);
-    }*/
+    }
+#endif
 }
