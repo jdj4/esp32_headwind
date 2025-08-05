@@ -4,7 +4,7 @@
 # Requires avahi-utils package `sudo apt install avahi-utils`
 
 # Get the dynamic IP for the microcontroller
-PORT=$(avahi-resolve-host-name -4 Headwind_1.local | awk '{print $2}')
+PORT=$(avahi-resolve-host-name -4 Headwind.local | awk '{print $2}')
 
 # Build project files if the build flag is passed
 if [ "$1" = "-b" ]; then

@@ -16,7 +16,7 @@ static BLEUUID charStatusUUID("00002ada-0000-1000-8000-00805f9b34fb");
 //static BLEAddress headwindAddress("dd:d5:42:30:32:4f");
 
 // Change this hardcoded MAC Address to correspond to the MAC Address of the correct headwind fan
-// on a Linux device, the command `bluetoothctl` followed by `scan on` can be used to find the address
+// on a Linux CLI, the command `bluetoothctl` followed by `scan on` can be used to find the address
 static BLEAddress headwindAddress("dc:f8:0d:3c:c7:b9");
 
 class HeadwindController : BLEClientCallbacks {
