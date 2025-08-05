@@ -30,19 +30,13 @@ String deviceName = "Headwind";
 const char* NAME_PARAM = "device_name";
 const char* SSID_PARAM = "ssid";
 const char* PASS_PARAM = "pass";
-//const char* IP_PARAM = "ip";
-//const char* GATEWAY_PARAM = "gateway";
 
 const char* deviceNamePath = "/device_name.txt";
 const char* ssidPath = "/ssid.txt";
 const char* passPath = "/pass.txt";
-//const char* ipPath = "/ip.txt";
-//const char* gatewayPath = "/gateway.txt";
 
 String ssid;
 String password;
-//String ip;
-//String gateway;
 
 IPAddress localIP; // (192, 168, 1, 200)
 IPAddress localGateway; // (192, 168, 1, 1)
@@ -53,7 +47,6 @@ const long interval = 10000; // Interval to wait for wifi connection (millis)
 
 HeadwindController* headwind;
 bool initialConnection;
-bool configSet;
 int speed;
 
 void initLittleFS() {
@@ -103,13 +96,8 @@ bool connectToWiFi() {
     }
     const char* ssid_c = ssid.c_str();
     const char* pass_c = password.c_str();
-    //const char* ip_c = ip.c_str();
-    //const char* gateway_c = gateway.c_str();
 
     WiFi.mode(WIFI_STA);
-    //localIP.fromString(ip_c);
-    //localGateway.fromString(gateway_c);
-
     WiFi.begin(ssid_c, pass_c);
 
     unsigned long currentMillis = millis();
@@ -148,18 +136,6 @@ void setup() {
     if (!connectionSuccess)
         Serial.println("Connection failed");
 
-    // Setup SPIFFS for reading WiFi credentials
-    /*if (!SPIFFS.begin(true)) {
-        Serial.println("Faled to mount file system");
-        return;
-    }
-    Serial.println("SPIFFS file system mounted successfully");
-    WiFi_Config config = loadConfigData();
-    if (config.ssid == nullptr || config.password == nullptr) {
-        Serial.println("WiFi config file not found");
-        return;
-    }*/
-
     initLittleFS();
 #if (FORMAT_FS)
     LittleFS.format(); // Formats the filesystem for testing purposes
@@ -167,13 +143,6 @@ void setup() {
     deviceName = readWiFiConfig(LittleFS, deviceNamePath);
     ssid = readWiFiConfig(LittleFS, ssidPath);
     password = readWiFiConfig(LittleFS, passPath);
-    //ip = readWiFiConfig(LittleFS, ipPath);
-    //gateway = readWiFiConfig(LittleFS, gatewayPath);
-
-    // TODO: Remove this
-    configSet = !(ssid == "");
-    Serial.print("Config set: ");
-    Serial.println(configSet);
 
     initialConnection = true;
     if (!connectToWiFi()) {
@@ -181,17 +150,7 @@ void setup() {
 
         IPAddress IP = WiFi.softAPIP();
         Serial.print("Access Point IP address, set ssid and password of your network here: ");
-        Serial.println(IP); 
-        
-        /*if (LittleFS.exists("/wifimanager.html"))
-            Serial.println("Wifi manager exists!");
-        else
-            Serial.println("Wifi manager does not exist");*/
-
-        // Web Server Root URL
-        /*server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-            request->send(LittleFS, "/wifimanager.html", "text/html");
-        });*/
+        Serial.println(IP);
 
         server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
             request->send(200, "text/html", R"rawliteral(
@@ -255,21 +214,6 @@ void setup() {
                         Serial.println(password);
                         writeWiFiConfig(LittleFS, passPath, password.c_str());
                     }
-                    // HTTP POST ip value
-                    /*if (p->name() == IP_PARAM) {
-                        ip = p->value();
-                        Serial.print("IP Address set to: ");
-                        Serial.println(ip);
-                        writeWiFiConfig(LittleFS, ipPath, ip.c_str());
-                    }
-                    // HTTP POST gateway value
-                    if (p->name() == GATEWAY_PARAM) {
-                        gateway = p->value();
-                        Serial.print("Gateway set to: ");
-                        Serial.println(gateway);
-                        writeWiFiConfig(LittleFS, gatewayPath, gateway.c_str());
-                    }*/
-                    //Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
                 }
             }
 #if (FORMAT_FS)
@@ -375,7 +319,7 @@ void loop() {
         delay(1000);
     }
 #if (!FORMAT_FS)
-    if (configSet && WiFi.status() != WL_CONNECTED) {
+    if (WiFi.status() != WL_CONNECTED) {
         Serial.println("Reconnecting to WiFi...");
         initialConnection = false;
         connectToWiFi();
