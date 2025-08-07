@@ -8,7 +8,17 @@
 
 #include "HeadwindController.h"
 
-//#define DEVICE_NAME "Headwind"
+// Pinout definitions
+#define FAN 0
+#define SW1 1
+#define SW2 3
+#define SW3 4
+#define LED0 5
+#define LED3 7
+#define LED5 10
+
+// Regular constants
+#define MAX_SPEED 100
 #define HTTP_PORT 80
 
 // Conditional compilation flag, set to `true` to erase the contents of the ESP filesystem
@@ -26,6 +36,8 @@ const int pluginPort = 31322;
 AsyncWebServer server(HTTP_PORT);
 
 String deviceName = "Headwind";
+String ssid;
+String password;
 
 const char* NAME_PARAM = "device_name";
 const char* SSID_PARAM = "ssid";
@@ -35,17 +47,17 @@ const char* deviceNamePath = "/device_name.txt";
 const char* ssidPath = "/ssid.txt";
 const char* passPath = "/pass.txt";
 
-String ssid;
-String password;
-
 IPAddress localIP; // (192, 168, 1, 200)
 IPAddress localGateway; // (192, 168, 1, 1)
 IPAddress subnet(255, 255, 0, 0);
 
-unsigned long prevMillis = 0;
+// Global variables
+unsigned long prevMillisWiFi = 0;
 const long interval = 10000; // Interval to wait for wifi connection (millis)
 
-HeadwindController* headwind;
+unsigned long prevMillisFan = 0;
+bool fanState = false;
+
 bool initialConnection;
 int speed;
 
@@ -101,7 +113,7 @@ bool connectToWiFi() {
     WiFi.begin(ssid_c, pass_c);
 
     unsigned long currentMillis = millis();
-    prevMillis = currentMillis;
+    prevMillisWiFi = currentMillis;
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
 
@@ -111,7 +123,7 @@ bool connectToWiFi() {
             Serial.println("Reconnecting to WiFi...");
 
         currentMillis = millis();
-        if (currentMillis - prevMillis >= interval) {
+        if (currentMillis - prevMillisWiFi >= interval) {
             Serial.println("Failed to connect to WiFi");
             return false;
         }
@@ -125,16 +137,13 @@ bool connectToWiFi() {
 void setup() {
     Serial.begin(115200);
 
-    // Connect to bluetooth and wifi
-    BLEDevice::init("ESP32-BLE-CLIENT");
-    Serial.println("BLE Device initialized");
-
-    headwind = new HeadwindController();
-    Serial.println("Headwind defined");
-
-    bool connectionSuccess = headwind->connectToHeadwind();
-    if (!connectionSuccess)
-        Serial.println("Connection failed");
+    pinMode(FAN, OUTPUT);
+    pinMode(SW1, INPUT);
+    pinMode(SW2, INPUT);
+    pinMode(SW3, INPUT);
+    pinMode(LED0, OUTPUT);
+    pinMode(LED3, OUTPUT);
+    pinMode(LED5, OUTPUT);
 
     initLittleFS();
 #if (FORMAT_FS)
@@ -148,10 +157,11 @@ void setup() {
     if (!connectToWiFi()) {
         WiFi.softAP("ESP-WIFI-MANAGER", NULL);
 
-        IPAddress IP = WiFi.softAPIP();
+        IPAddress ip = WiFi.softAPIP();
         Serial.print("Access Point IP address, set ssid and password of your network here: ");
-        Serial.println(IP);
+        Serial.println(ip);
 
+        // Web interface for getting WiFi credentials
         server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
             request->send(200, "text/html", R"rawliteral(
                 <!DOCTYPE html>
@@ -188,26 +198,24 @@ void setup() {
         
         server.serveStatic("/", LittleFS, "/");
         
+        // Records device name, ssid, and password from user input
         server.on("/", HTTP_POST, [](AsyncWebServerRequest *request) {
             int params = request->params();
             for(int i=0;i<params;i++){
                 const AsyncWebParameter* p = request->getParam(i);
                 if(p->isPost()) {
-                    // HTTP POST device name value
                     if (p->name() == NAME_PARAM) {
                         deviceName = p->value();
                         Serial.print("Device name set to: ");
                         Serial.println(deviceName);
                         writeWiFiConfig(LittleFS, deviceNamePath, deviceName.c_str());
                     }
-                    // HTTP POST ssid value
                     if (p->name() == SSID_PARAM) {
                         ssid = p->value();
                         Serial.print("SSID set to: ");
                         Serial.println(ssid);
                         writeWiFiConfig(LittleFS, ssidPath, ssid.c_str());
                     }
-                    // HTTP POST pass value
                     if (p->name() == PASS_PARAM) {
                         password = p->value();
                         Serial.print("Password set to: ");
@@ -228,8 +236,8 @@ void setup() {
     }
 
     // Set up ArduinoOTA for over the air updates
-    //ArduinoOTA.setHostname(DEVICE_NAME);
     ArduinoOTA.setHostname(deviceName.c_str());
+    Serial.printf("Hostname set to: %s\n", deviceName.c_str());
     ArduinoOTA.begin();
     //connection.begin(connectionPort);
 
@@ -269,7 +277,7 @@ void setup() {
         }
     });
 
-    // Setup async webserver to set fan speed remotely
+    // Web interface to remotely set fan speed
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
         request->send(200, "text/html", R"rawliteral(
           <!DOCTYPE HTML><html>
@@ -297,10 +305,8 @@ void setup() {
     server.on("/set_speed", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (request->hasParam("value")) {
             speed = request->getParam("value")->value().toInt();
-            if (headwind->isConnected()) {
-                bool result = headwind->setPower(speed);
-                Serial.printf("Set power result for headwind: %s\n", result ? "Success" : "Failure");
-            }
+            speed = (speed < 0) ? 0 : (speed > 100 ? 100 : speed); // Ensure speed is between 0-100 inclusive
+            Serial.printf("Setting fan speed to: %d\n", speed);
             request->send(200, "text/plain", "OK");
         } else {
             request->send(400, "text/plain", "Bad Request: Missing value parameter");
@@ -313,11 +319,30 @@ void setup() {
 void loop() {
     ArduinoOTA.handle();
 
-    if (!headwind->isConnected()) {
-        Serial.println("Reconnecting to Headwind...");
-        headwind->reconnect();
-        delay(1000);
+    digitalWrite(LED0, !digitalRead(SW1));
+    digitalWrite(LED3, !digitalRead(SW2));
+    digitalWrite(LED5, !digitalRead(SW3));
+
+    // Software simulation of PWM to regulate fan speed
+    unsigned long currentMillis = millis();
+    if (currentMillis - prevMillisFan >= MAX_SPEED) {
+        prevMillisFan = currentMillis;
+        fanState = false;
+        digitalWrite(FAN, false);
     }
+
+    if (currentMillis - prevMillisFan < speed) {
+        if (!fanState) {
+            fanState = true;
+            digitalWrite(FAN, true);
+        }
+    } else {
+        if (fanState) {
+            fanState = false;
+            digitalWrite(FAN, false);
+        }
+    }
+
 #if (!FORMAT_FS)
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("Reconnecting to WiFi...");
