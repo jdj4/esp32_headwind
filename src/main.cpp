@@ -7,6 +7,8 @@
 #include <LittleFS.h>
 
 #include "HeadwindController.h"
+#include "debounceButton.h"
+
 
 // Pinout definitions
 #define FAN 0
@@ -17,7 +19,12 @@
 #define LED3 7
 #define LED5 10
 
+debounceButton decreaseSpeedButton(SW1);
+debounceButton powerButton(SW2);
+debounceButton increaseSpeedButton(SW3);
+
 // Regular constants
+#define MIN_SPEED 0
 #define MAX_SPEED 100
 #define HTTP_PORT 80
 
@@ -144,6 +151,9 @@ void setup() {
     pinMode(LED0, OUTPUT);
     pinMode(LED3, OUTPUT);
     pinMode(LED5, OUTPUT);
+    decreaseSpeedButton.init(true);
+    powerButton.init(true);
+    increaseSpeedButton.init(true);
 
     initLittleFS();
 #if (FORMAT_FS)
@@ -313,15 +323,41 @@ void setup() {
         }
     });
 
+    server.on("/current_speed", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/plain", "Speed is set to: " + String(speed) + "\n");
+    });
+
     server.begin();
 }
 
 void loop() {
     ArduinoOTA.handle();
+    debounceButton::update();
 
-    digitalWrite(LED0, !digitalRead(SW1));
+    digitalWrite(LED0, digitalRead(SW1));
     digitalWrite(LED3, !digitalRead(SW2));
-    digitalWrite(LED5, !digitalRead(SW3));
+    digitalWrite(LED5, digitalRead(SW3));
+
+    // Fan control with physical buttons
+    // TODO: Needs some better bounds checking
+    if (decreaseSpeedButton.wasKlicked()) {
+        if (speed > MIN_SPEED) speed -= 10;
+    } else if (decreaseSpeedButton.wasDoubleKlicked()) {
+        if (speed > MIN_SPEED) speed -= 20;
+    }
+
+    if (powerButton.wasKlicked()) {
+        speed = 0;
+    } else if (powerButton.wasDoubleKlicked()) {
+        LittleFS.format();
+        ESP.restart();
+    }
+
+    if (increaseSpeedButton.wasKlicked()) {
+        if (speed < MAX_SPEED) speed += 10;
+    } else if (increaseSpeedButton.wasDoubleKlicked()) {
+        if (speed < MAX_SPEED) speed += 20;
+    }
 
     // Software simulation of PWM to regulate fan speed
     unsigned long currentMillis = millis();
@@ -343,12 +379,12 @@ void loop() {
         }
     }
 
-#if (!FORMAT_FS)
+/*#if (!FORMAT_FS)
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("Reconnecting to WiFi...");
         initialConnection = false;
         connectToWiFi();
         delay(1000);
     }
-#endif
+#endif*/
 }
